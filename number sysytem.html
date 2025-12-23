@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="si">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔢 සංඛ්‍යා පද්ධති 3D අභියෝගය</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Custom Styles -->
+    <style>
+        /* 3D දර්ශනය සඳහා Canvas එක පුරාම දිගු කිරීම */
+        #game-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0; /* පසුබිමට යැවීම */
+        }
+        /* UI එක 3D දර්ශනය මතට ගැනීම */
+        #ui-overlay {
+            position: relative;
+            z-index: 10; 
+            min-height: 100vh;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+
+    <!-- 3D දර්ශනය පෙන්වන කන්ටේනරය -->
+    <div id="game-container"></div>
+
+    <!-- පරිශීලක අතුරුමුහුණත (UI) -->
+    <div id="ui-overlay" class="p-4 flex flex-col items-center justify-start">
+        <h1 class="text-4xl md:text-5xl font-extrabold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-yellow-400 to-red-500 py-2">
+            🌌 සංඛ්‍යා පද්ධති 3D උසස් ගවේෂණය 
+        </h1>
+        
+        <!-- උපදෙස් සහ ලකුණු ප්‍රදර්ශනය -->
+        <div class="w-full max-w-2xl bg-gray-800 bg-opacity-90 p-5 rounded-xl shadow-2xl border-2 border-blue-600">
+            <div class="flex justify-between items-center">
+                <p id="current-task" class="text-xl font-medium text-blue-300">ආරම්භ කරන්න බොත්තම ඔබා ක්‍රීඩාව පටන් ගන්න.</p>
+                <p class="text-xl">ලකුණු: <span id="score" class="font-extrabold text-yellow-400">0</span></p>
+            </div>
+        </div>
+
+        <!-- ආරම්භක තිරය -->
+        <div id="start-screen" class="mt-20 text-center p-8 bg-gray-800 bg-opacity-90 rounded-lg shadow-2xl max-w-lg">
+             <p class="mb-6 text-lg text-gray-300">ද්විමය, අෂ්ටමය, දශමය සහ ෂඩශමය අතර සියලුම පරිවර්තන සිදුකර ලකුණු ලබා ගන්න!</p>
+             <button id="start-btn" class="bg-green-500 hover:bg-green-600 text-white font-extrabold text-2xl py-4 px-8 rounded-full shadow-lg transition transform hover:scale-105 active:scale-95">
+                ගමන අරඹමු! (Start Advanced Game)
+            </button>
+        </div>
+
+        <!-- පිළිතුරු ඇතුල් කරන තැන -->
+        <div id="input-area" class="mt-8 w-full max-w-md bg-gray-700 bg-opacity-95 p-6 rounded-xl shadow-2xl border border-gray-600 hidden">
+            <label for="answer" class="block text-lg font-medium mb-3 text-gray-200">ඔබේ පරිවර්තනය ඇතුල් කරන්න (Hex සඳහා Capitals භාවිතා කරන්න):</label>
+            <input type="text" id="answer" class="w-full p-3 rounded-lg text-gray-900 focus:ring-4 focus:ring-blue-500 focus:border-blue-500 border-none" placeholder="පිළිතුර මෙහි ඇතුල් කරන්න (උදා: 1A)">
+            <button id="submit-btn" class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition duration-300 transform hover:shadow-xl">
+                පිළිතුර ඉදිරිපත් කරන්න
+            </button>
+        </div>
+    </div>
+
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Three.js Orbit Controls (කැමරාව කරකැවීමට) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- ප්‍රධාන JavaScript තර්කනය -->
+    <script>
+        // Global Variables
+        let scene, camera, renderer, controls; // controls for orbiting the camera
+        let score = 0;
+        let currentChallenge = {};
+        const gameContainer = document.getElementById('game-container');
+        const scoreElement = document.getElementById('score');
+        const taskElement = document.getElementById('current-task');
+        const startScreen = document.getElementById('start-screen');
+        const inputArea = document.getElementById('input-area');
+        const startButton = document.getElementById('start-btn');
+        const submitButton = document.getElementById('submit-btn');
+        const answerInput = document.getElementById('answer');
+        
+        // Helper function to get base name
+        function getBaseName(base) {
+            switch (base) {
+                case 2: return 'ද්විමය (Binary)';
+                case 8: return 'අෂ්ටමය (Octal)';
+                case 10: return 'දශමය (Decimal)';
+                case 16: return 'ෂඩශමය (Hexadecimal)';
+                default: return 'නොදන්නා පද්ධතිය';
+            }
+        }
+
+        // 3D දර්ශනය ආරම්භ කිරීම (Updated for 4 bases)
+        function initThreeJS() {
+            // 1. දර්ශනය (Scene)
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a20); // Darker space
+
+            // 2. කැමරාව (Camera)
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1, 5);
+
+            // 3. රෙන්ඩරය (Renderer)
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            gameContainer.appendChild(renderer.domElement);
+            
+            // 4. Orbit Controls (කැමරාව කරකැවීමට)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // සුමට චලනය
+            controls.dampingFactor = 0.05;
+
+            // 5. ආලෝකය (Lighting)
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); 
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 5, 5);
+            scene.add(directionalLight);
+
+            // 6. ජ්‍යාමිතිය (Geometry) - සංකල්පීය ත්‍රිමාණ වස්තු නිර්මාණය
+            
+            // Base 10: Decimal Core (Sphere)
+            const decimalGeometry = new THREE.SphereGeometry(1, 32, 32);
+            const decimalMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xff4500, // රතු-තැඹිලි
+                emissive: 0x882200, 
+                shininess: 100
+            });
+            const decimalSphere = new THREE.Mesh(decimalGeometry, decimalMaterial);
+            decimalSphere.name = 'DecimalSystem';
+            scene.add(decimalSphere);
+
+            // Base 2: Binary Rings
+            for (let i = 0; i < 4; i++) {
+                const ringGeometry = new THREE.TorusGeometry(2 + i * 0.5, 0.05, 16, 100);
+                const ringMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: false });
+                const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+                ring.rotation.x = Math.PI / 2;
+                ring.rotation.y = i * 0.1;
+                ring.name = `BinaryRing${i}`;
+                scene.add(ring);
+            }
+            
+            // Base 8: Octal Icosahedron
+            const octalGeometry = new THREE.IcosahedronGeometry(0.5);
+            const octalMaterial = new THREE.MeshPhongMaterial({ color: 0xffa500, wireframe: false, flatShading: true });
+            const octalShape = new THREE.Mesh(octalGeometry, octalMaterial);
+            octalShape.position.set(3, 0, 0);
+            octalShape.name = 'OctalSystem';
+            scene.add(octalShape);
+            
+            // Base 16: Hexadecimal Torus Knot
+            const hexGeometry = new THREE.TorusKnotGeometry(0.5, 0.15, 100, 16);
+            const hexMaterial = new THREE.MeshPhongMaterial({ color: 0x8a2be2, shininess: 150 });
+            const hexShape = new THREE.Mesh(hexGeometry, hexMaterial);
+            hexShape.position.set(-3, 0, 0);
+            hexShape.name = 'HexSystem';
+            scene.add(hexShape);
+            
+            // Window Resizing හැසිරවීම
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // දර්ශනය සජීවීකරණය (Animation Loop)
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 3D වස්තූන් කරකැවීම
+            const decimalSphere = scene.getObjectByName('DecimalSystem');
+            if (decimalSphere) {
+                decimalSphere.rotation.x += 0.003;
+                decimalSphere.rotation.y += 0.005;
+            }
+            
+            // ද්විමය වළලු කරකැවීම
+            for (let i = 0; i < 4; i++) {
+                const ring = scene.getObjectByName(`BinaryRing${i}`);
+                if (ring) {
+                    ring.rotation.z += 0.007 + i * 0.001;
+                }
+            }
+            
+            const octalShape = scene.getObjectByName('OctalSystem');
+            if (octalShape) {
+                octalShape.rotation.x += 0.005;
+                octalShape.rotation.z += 0.008;
+            }
+            
+            const hexShape = scene.getObjectByName('HexSystem');
+            if (hexShape) {
+                hexShape.rotation.y += 0.009;
+                hexShape.rotation.z += 0.004;
+            }
+            
+            if (controls) {
+                 controls.update(); // OrbitControls update
+            }
+           
+            renderer.render(scene, camera);
+        }
+
+        // ----------------------------------------------------
+        // සංඛ්‍යා පද්ධති තර්කනය (Number Systems Logic)
+        // ----------------------------------------------------
+        
+        // 3D වස්තු අවධාරණය කිරීමේ ශ්‍රිතය
+        function highlightTargetShape(targetBase) {
+            // සියල්ල යළි සකසන්න
+            scene.getObjectByName('DecimalSystem').material.emissive.setHex(0x882200);
+            const octalShape = scene.getObjectByName('OctalSystem');
+            if (octalShape) {
+                 octalShape.material.wireframe = false;
+                 octalShape.material.color.setHex(0xffa500);
+            }
+            const hexShape = scene.getObjectByName('HexSystem');
+            if (hexShape) hexShape.material.color.setHex(0x8a2be2);
+            for (let i = 0; i < 4; i++) {
+                const ring = scene.getObjectByName(`BinaryRing${i}`);
+                if (ring) ring.material.color.setHex(0x00ff00);
+            }
+
+            // ඉලක්ක පද්ධතිය ඉස්මතු කරන්න
+            switch (targetBase) {
+                case 2:
+                    // Binary Rings flash white
+                    for (let i = 0; i < 4; i++) {
+                        const ring = scene.getObjectByName(`BinaryRing${i}`);
+                        if (ring) ring.material.color.setHex(0xffffff);
+                    }
+                    break;
+                case 8:
+                    // Octal Shape Wireframe on
+                    if (octalShape) {
+                        octalShape.material.wireframe = true;
+                        octalShape.material.color.setHex(0x00ffff); // Cyan highlight
+                    }
+                    break;
+                case 10:
+                    // Decimal Core brightens
+                    scene.getObjectByName('DecimalSystem').material.emissive.setHex(0xffaa00);
+                    break;
+                case 16:
+                    // Hex Shape changes color
+                    if (hexShape) hexShape.material.color.setHex(0xff00ff); // Magenta highlight
+                    break;
+            }
+        }
+
+        // අහඹු අභියෝගයක් ජනනය කිරීම (Updated for all conversions)
+        function generateChallenge() {
+            const bases = [2, 8, 10, 16];
+            
+            // Source Base and Target Base must be different
+            let sourceBase, targetBase;
+            do {
+                sourceBase = bases[Math.floor(Math.random() * bases.length)];
+                targetBase = bases[Math.floor(Math.random() * bases.length)];
+            } while (sourceBase === targetBase);
+
+            // Base 10 අගයක් ජනනය කරන්න (100 සිට 1000 අතර)
+            const decimalValue = Math.floor(Math.random() * 900) + 100; 
+            
+            // ප්‍රශ්නය ජනනය කරන්න (Source Base එකට convert කරන්න)
+            const questionValue = decimalValue.toString(sourceBase).toUpperCase();
+            
+            // නිවැරදි පිළිතුර ජනනය කරන්න (Target Base එකට convert කරන්න)
+            const correctAnswer = decimalValue.toString(targetBase).toUpperCase();
+
+            currentChallenge = {
+                question: questionValue,
+                answer: correctAnswer,
+                sourceBase: sourceBase,
+                targetBase: targetBase,
+                sourceBaseName: getBaseName(sourceBase),
+                targetBaseName: getBaseName(targetBase)
+            };
+            
+            taskElement.textContent = `🚨 අභියෝගය: ${questionValue} (${sourceBase}) අංකය ${currentChallenge.targetBaseName} (${targetBase}) වලට හරවන්න.`;
+            answerInput.value = '';
+            answerInput.focus();
+
+            // 3D Visual Feedback for the Target Base
+            highlightTargetShape(targetBase);
+        }
+
+        // පිළිතුරු ඉදිරිපත් කිරීම හැසිරවීම (Updated for all conversions)
+        function handleSubmit() {
+            // Input is trimmed and converted to UPPERCASE to match Hex answers (A-F)
+            const userAnswer = answerInput.value.trim().toUpperCase();
+            const decimalSphere = scene.getObjectByName('DecimalSystem');
+            
+            if (!userAnswer) {
+                taskElement.textContent = 'කරුණාකර පිළිතුරක් ඇතුල් කරන්න.';
+                return;
+            }
+            
+            const targetBase = currentChallenge.targetBase;
+            let isValidInput = true;
+            
+            // Input Validation check for the target base's expected format
+            const regexMap = {
+                2: /^[01]+$/,
+                8: /^[0-7]+$/,
+                10: /^[0-9]+$/,
+                16: /^[0-9A-F]+$/
+            };
+            
+            if (regexMap[targetBase] && !regexMap[targetBase].test(userAnswer)) {
+                isValidInput = false;
+            }
+            
+            // Check if the answer matches AND if the format is valid
+            if (userAnswer === currentChallenge.answer && isValidInput) {
+                score += 15;
+                // නිවැරදි: කොළ පාටට Flash වීම
+                decimalSphere.material.emissive.setHex(0x00ff00); 
+                taskElement.classList.remove('text-blue-300', 'text-red-400');
+                taskElement.classList.add('text-green-400');
+                taskElement.textContent = `✅ නියමයි! ${currentChallenge.question} (${currentChallenge.sourceBase}) = ${currentChallenge.answer} (${currentChallenge.targetBase}). ලකුණු +15.`;
+                
+                setTimeout(() => {
+                    decimalSphere.material.emissive.setHex(0x882200); // වර්ණය යළි සකසන්න
+                    taskElement.classList.remove('text-green-400');
+                    taskElement.classList.add('text-blue-300');
+                    generateChallenge();
+                }, 1500);
+                
+            } else {
+                score = Math.max(0, score - 5); // ලකුණු 0 ට වඩා අඩුවීම නවත්වයි
+                // වැරදි: රතු පාටට Flash වීම
+                decimalSphere.material.emissive.setHex(0xff0000); 
+                taskElement.classList.remove('text-blue-300', 'text-green-400');
+                taskElement.classList.add('text-red-400');
+                
+                if (!isValidInput) {
+                     taskElement.textContent = `❌ වැරදියි! ඔබ ඇතුළත් කළ අගය ${currentChallenge.targetBase} පද්ධතියේ ආකෘතියට ගැලපෙන්නේ නැහැ.`;
+                } else {
+                     taskElement.textContent = `❌ වැරදියි! නිවැරදි පිළිතුර: ${currentChallenge.answer} (${currentChallenge.targetBase}). ලකුණු -5.`;
+                }
+
+                setTimeout(() => {
+                    decimalSphere.material.emissive.setHex(0x882200); // වර්ණය යළි සකසන්න
+                    taskElement.classList.remove('text-red-400');
+                    taskElement.classList.add('text-blue-300');
+                    generateChallenge();
+                }, 3000);
+            }
+            
+            scoreElement.textContent = score;
+        }
+
+        // ----------------------------------------------------
+        // Event Listeners
+        // ----------------------------------------------------
+
+        // ක්‍රීඩාව ආරම්භ කිරීම
+        startButton.addEventListener('click', () => {
+            // Three.js ආරම්භ කිරීමට පෙර OrbitControls පූරණය වී ඇති බවට සහතික වීම
+            if (typeof THREE.OrbitControls === 'undefined') {
+                taskElement.textContent = '3D පුස්තකාලය පූරණය වෙමින් පවතී... මොහොතක් රැඳී සිටින්න.';
+                return; 
+            }
+            
+            startScreen.classList.add('hidden');
+            inputArea.classList.remove('hidden');
+            
+            // 3D දර්ශනය සහ සජීවීකරණය ආරම්භ කිරීම
+            initThreeJS();
+            animate();
+            
+            // පළමු අභියෝගය ජනනය කිරීම
+            generateChallenge();
+        });
+
+        // පිළිතුර ඉදිරිපත් කරන බොත්තම
+        submitButton.addEventListener('click', handleSubmit);
+
+        // Enter key එක භාවිතයෙන් පිළිතුර ඉදිරිපත් කිරීමට
+        answerInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleSubmit();
+            }
+        });
+
+        // ආරම්භයේදී UI එක සූදානම් කිරීම 
+        document.addEventListener('DOMContentLoaded', () => {
+            taskElement.textContent = 'ආරම්භ කිරීමට "ගමන අරඹමු!" ඔබන්න. කැමරාව කරකැවීමට මූසිකය භාවිතා කරන්න.';
+        });
+    </script>
+</body>
+</html>
